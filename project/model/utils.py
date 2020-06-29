@@ -76,7 +76,6 @@ def image_enhance(image):
     return image
 
 
-# todo
 def color_jitter(image):
     """
     颜色抖动，将RGB色域图像转换为HSV色域，然后随机抖动
@@ -99,7 +98,6 @@ def color_jitter(image):
     return image
 
 
-# todo
 def get_random_data(annotation_line, input_shape, max_boxes=20, jitter=0.3,
                     random=True, data_enhance=False, dithering=False):
     """
