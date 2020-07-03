@@ -329,19 +329,119 @@ def preprocess_true_boxes(true_boxes, input_shape, anchors, num_classes: int):
 
                     y_true[layer][i, j, e, k, 0:4] = true_boxes[i, t, 0:4]
                     y_true[layer][i, j, e, k, 4] = 1
-                    y_true[layer][i, j, e, k, 5+c] = 1
+                    y_true[layer][i, j, e, k, 5 + c] = 1
     # y_true:[(None,13,13,3,5+num_classes),(None,26,26,3,5+num_classes),(None,52,52,3,5+num_classes)]
     return y_true
 
 
 # todo
 def box_iou(b1, b2):
-    pass
+    """
+    计算两个目标框的IOU
+    :param b1: 第一个框
+    :param b2: 第二个框
+    :return: iou值张量
+    """
+    b1 = K.expand_dims(b1, -2)
+    b1_xy = b1[..., :2]
+    b1_wh = b1[..., 2:4]
+    b1_wh_half = b1_wh / 2.
+    b1_min = b1_xy - b1_wh_half
+    b1_max = b1_xy + b1_wh_half
+
+    b2 = K.expand_dims(b2, 0)
+    b2_xy = b2[..., :2]
+    b2_wh = b2[..., 2:4]
+    b2_wh_half = b2_wh / 2.
+    b2_min = b2_xy - b2_wh_half
+    b2_max = b2_xy + b2_wh_half
+
+    intersect_min = K.maximum(b1_min, b2_min)
+    intersect_max = K.minimum(b1_max, b2_max)
+    intersect_wh = K.maximum(intersect_max - intersect_min, 0.)
+    intersect_area = intersect_wh[..., 0] * intersect_wh[..., 1]
+    b1_area = b1_wh[..., 0] * b1_wh[..., 1]
+    b2_area = b2_wh[..., 0] * b2_wh[..., 1]
+    iou = intersect_area / (b1_area + b2_area - intersect_area)
+    return iou
+
+
+def yolo_loss(args, anchors, num_classes, ignore_thresh=0.5, print_loss=False):
+    """
+    yolov3的loss计算，中心点loss、宽高loss、置信度loss、类别回归loss
+    :param args: list的组合，包括了预测值和真实值，具体为：
+                 arg[:num_layers]--预测值yolo_outputs,
+                 arg[num_layers:]--真实值y_true
+    :param anchors: 锚框数
+    :param num_classes: 类别数
+    :param ignore_thresh: iou阈值，忽略小于该阈值的目标框
+    :param print_loss: loss的打印开关
+    :return: loss张量
+    """
+    num_layers = len(anchors) // 3  # 计算输出层数，一般是3层，yolo—tiny是2层
+    yolo_outputs = args[:num_layers]
+    y_true = args[num_layers:]
+    anchor_mask = [[6, 7, 8], [3, 4, 5], [0, 1, 2]]  # if num_layers==3 else [[3,4,5], [1,2,3]]
+    input_shape = K.cast(K.shape(yolo_outputs[0])[1:3] * 32, K.dtype(y_true[0]))  # 很显然，这里计算输入尺寸默认(416, 416)
+    grid_shapes = [K.cast(K.shape(yolo_outputs[layer])[1:3], K.dtype(y_true[0])) for layer in range(num_layers)]
+    loss = 0
+    m = K.shape(yolo_outputs[0])[0]  # m是batch size
+    mf = K.cast(m, K.dtype(yolo_outputs[0]))
+
+    for layer in range(num_layers):
+        object_mask = y_true[layer][..., 4:5]  # 置信度
+        true_class_probs = y_true[layer][..., 5:]  # 分类
+        grid, raw_pred, pred_xy, pred_wh = yolo_head(yolo_outputs[layer], anchors[anchor_mask[layer]],
+                                                     num_classes, input_shape, calc_loss=True)
+        pred_box = K.concatenate([pred_xy, pred_wh])  # 相对于gird的box参数(x, y, w, h)
+        # 对x, y, w, b转换公式的反变换
+        raw_true_xy = y_true[layer][..., :2] * grid_shapes[layer][::-1] - grid  # :2就是x,y
+        raw_true_wh = K.log(y_true[layer][..., 2:4] / anchors[anchor_mask[layer]] * input_shape[::-1])
+        raw_true_wh = K.switch(object_mask, raw_true_wh, K.zeros_like(raw_true_wh))  # 避免log(0)=-inf的情况
+        box_loss_scale = 2 - y_true[layer][..., 2:3] * y_true[layer][..., 3:4]
+
+        # 遍历每个batch，这里tf.TensorArray相当于一个动态数组，size=1表示为二维
+        ignore_mask = tf.TensorArray(K.dtype(y_true[0]), size=1, dynamic_size=True)
+        object_mask_bool = K.cast(object_mask, 'bool')  # 将真实标定的数据转换为T or F的掩膜
+
+        def loop_body(b, ignore_mask):  # 这个ignore_mask很有意思 #todo
+            # object_mask_bool(b, 13, 13, 3, 4)--五维数组，第b张图的第layer层feature map
+            # true_box将第b图第layer层feature map,有目标窗口的坐标位置取出来。true_box[x,y,w,h]
+            true_box = tf.boolean_mask(y_true[layer][b, ..., 0:4], object_mask_bool[b, ..., 0])
+            iou = box_iou(pred_box[b], true_box)  # 计算预测值和真实的iou
+            best_iou = K.max(iou, axis=-1)  # 取每个grid上多个anchor box的最大iou
+            ignore_mask = ignore_mask.write(b, K.cast(best_iou<ignore_thresh, K.dtype(true_box)))
+            return b+1, ignore_mask
+
+        _, ignore_mask = tf.while_loop(lambda b: b < m, loop_body, [0, ignore_mask])  # todo
+        ignore_mask = ignore_mask.stack()  # 将一个列表的维数数目为R的张量堆积起来形成R+1维新张量，这里R应该是b
+        ignore_mask = K.expand_dims(ignore_mask, -1)  # ignoer_mask的shape是(b, 13, 13, 3, 1) "13 13"有三个layer
+        # x,y的交叉熵损失，这里ignore_mask确实还没怎么弄明白，后面还需要看看
+        xy_loss = object_mask * box_loss_scale * K.binary_crossentropy(raw_true_xy,
+                                                                       raw_pred[..., 0:2],
+                                                                       from_logits=True)
+        # w,h的均方差损失
+        wh_loss = object_mask * box_loss_scale * 0.5 * K.square(raw_true_wh - raw_pred[..., 2:4])
+        # 置信度交叉熵损失，这里没有物体的部分也要计算损失，因此是object和1-object的和
+        confidence_loss = object_mask * K.binary_crossentropy(object_mask, raw_pred[..., 4:5], from_logits=True) + \
+            (1 - object_mask) * K.binary_crossentropy(object_mask, raw_pred[..., 4:5], from_logits=True) * ignore_mask
+        # 分类损失
+        class_loss = object_mask * K.binary_crossentropy(true_class_probs, raw_pred[..., 5:], from_logits=True)
+
+        # 计算一个batch的总损失
+        xy_loss = K.sum(xy_loss) / mf
+        wh_loss = K.sum(wh_loss) / mf
+        confidence_loss = K.sum(confidence_loss) / mf
+        class_loss = K.sum(class_loss) / mf
+        loss += xy_loss + wh_loss + confidence_loss + class_loss
+        if print_loss:
+            loss = tf.print(loss, [loss, xy_loss, wh_loss, confidence_loss, class_loss, K.sum(ignore_mask)],
+                            message='loss:')
+    return loss
 
 
 if __name__ == '__main__':
     from tensorflow.keras.layers import Input
-
     model_input = Input(shape=(1248, 1248, 3))
     model_output = yolo_body(model_input, 3, 80)
     model_output.summary()
