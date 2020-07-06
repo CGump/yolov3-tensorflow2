@@ -9,6 +9,8 @@
 #
 # ================================================================
 import numpy as np
+import logging
+from logging.handlers import RotatingFileHandler
 from functools import reduce
 from PIL import Image, ImageEnhance
 from matplotlib.colors import rgb_to_hsv, hsv_to_rgb
@@ -95,7 +97,7 @@ def color_jitter(image):
     x[x > 1] = 1
     x[x < 0] = 0
     image_data = hsv_to_rgb(x * 255)  # numpy array, 0 to 1
-    return image
+    return image_data
 
 
 def get_random_data(annotation_line, input_shape, max_boxes=20, jitter=0.3,
@@ -201,6 +203,16 @@ def get_random_data(annotation_line, input_shape, max_boxes=20, jitter=0.3,
         box_data[:len(box)] = box
 
         return image_data, box_data
+
+
+def set_logging(file_path='./logs/recognize_fruit.log'):
+    LOG_FORMAT = ("%(asctime)s - %(levelname)s: %(message)s - " +
+                  "LINENO: %(lineno)s - " +
+                  "PATHNAME: %(pathname)s")
+
+    logging.basicConfig(handlers=[RotatingFileHandler(file_path, maxBytes=2*1024*1024, backupCount=10)],
+                        level=logging.INFO,
+                        format=LOG_FORMAT)
 
 
 if __name__ == '__main__':
