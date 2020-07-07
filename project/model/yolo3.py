@@ -404,14 +404,14 @@ def yolo_loss(args, anchors, num_classes, ignore_thresh=0.5, print_loss=False):
         ignore_mask = tf.TensorArray(K.dtype(y_true[0]), size=1, dynamic_size=True)
         object_mask_bool = K.cast(object_mask, 'bool')  # 将真实标定的数据转换为T or F的掩膜
 
-        def loop_body(b, ignore_mask):  # 这个ignore_mask很有意思 #todo
+        def loop_body(b, ignore_masks):  # 这个ignore_mask很有意思 #todo
             # object_mask_bool(b, 13, 13, 3, 4)--五维数组，第b张图的第layer层feature map
             # true_box将第b图第layer层feature map,有目标窗口的坐标位置取出来。true_box[x,y,w,h]
             true_box = tf.boolean_mask(y_true[layer][b, ..., 0:4], object_mask_bool[b, ..., 0])
             iou = box_iou(pred_box[b], true_box)  # 计算预测值和真实的iou
             best_iou = K.max(iou, axis=-1)  # 取每个grid上多个anchor box的最大iou
-            ignore_mask = ignore_mask.write(b, K.cast(best_iou<ignore_thresh, K.dtype(true_box)))
-            return b+1, ignore_mask
+            ignore_masks = ignore_masks.write(b, K.cast(best_iou < ignore_thresh, K.dtype(true_box)))
+            return b+1, ignore_masks
 
         _, ignore_mask = tf.while_loop(lambda b: b < m, loop_body, [0, ignore_mask])  # todo
         ignore_mask = ignore_mask.stack()  # 将一个列表的维数数目为R的张量堆积起来形成R+1维新张量，这里R应该是b
