@@ -413,7 +413,7 @@ def yolo_loss(args, anchors, num_classes, ignore_thresh=0.5, print_loss=False):
             ignore_masks = ignore_masks.write(b, K.cast(best_iou < ignore_thresh, K.dtype(true_box)))
             return b+1, ignore_masks
 
-        _, ignore_mask = tf.while_loop(lambda b: b < m, loop_body, [0, ignore_mask])  # todo
+        _, ignore_mask = tf.while_loop(lambda b, *arg: b < m, loop_body, [0, ignore_mask])  # todo
         ignore_mask = ignore_mask.stack()  # 将一个列表的维数数目为R的张量堆积起来形成R+1维新张量，这里R应该是b
         ignore_mask = K.expand_dims(ignore_mask, -1)  # ignoer_mask的shape是(b, 13, 13, 3, 1) "13 13"有三个layer
         # x,y的交叉熵损失，这里ignore_mask确实还没怎么弄明白，后面还需要看看
