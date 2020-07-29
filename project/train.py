@@ -39,10 +39,10 @@ cfg.read("model/config.ini", encoding="utf8")
 #  ==============================  训练配置  ================================
 
 ANNATION_PATH = cfg.get("train", "pointer_path")  # 训练集指针文件
-CLASSES_PATH = cfg.get("train", "classes_path")  # 类别文件voc_classes.txt存放地址
-ANCHORS_PATH = cfg.get("train", "anchors_path")  # 锚框文件yolo_anchors.txt存放地址
-INPUT_WIGHT = cfg.getint("train", "input_wight")  # 输入图像宽
-INPUT_HEIGHT = cfg.getint("train", "input_height")  # 输入图像高
+CLASSES_PATH = cfg.get("share", "classes_path")  # 类别文件voc_classes.txt存放地址
+ANCHORS_PATH = cfg.get("share", "anchors_path")  # 锚框文件yolo_anchors.txt存放地址
+INPUT_WIGHT = cfg.getint("share", "input_wight")  # 输入图像宽
+INPUT_HEIGHT = cfg.getint("share", "input_height")  # 输入图像高
 INPUT_SHAPE = (INPUT_WIGHT, INPUT_HEIGHT)  # 输入图像尺寸
 PRETRAINED = cfg.getboolean("train", "pretrained")  # 迁移训练控制位
 WEIGHT_PATH = cfg.get("train", "weight_path")  # 预训练文件

@@ -247,6 +247,7 @@ def yolo_eval(yolo_outputs, anchors, num_classes, image_shape, max_boxes=20, sco
     max_boxes_tensor = K.constant(max_boxes, dtype=tf.int32)
     boxes_ = []
     scores_ = []
+
     classes_ = []
     for c in range(num_classes):
         # 清理box中所有不达标的目标框
